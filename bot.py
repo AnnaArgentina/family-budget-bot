@@ -1,9 +1,14 @@
+# bot.py
 import os
 import sys
 import sqlite3
 from datetime import datetime, timedelta
 from contextlib import closing
 from dotenv import load_dotenv
+
+from flask import Flask, request
+import asyncio
+import threading
 
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,8 +18,9 @@ from telegram.ext import (
     ConversationHandler, filters, ContextTypes
 )
 
-# ====== ENV ======
+# ===================== ENV =====================
 load_dotenv()
+
 def _get_token() -> str:
     token = os.getenv("BOT_TOKEN", "").strip().strip('"').strip("'")
     if not token:
@@ -32,7 +38,7 @@ DEFAULT_INPUT_CCY = os.getenv("DEFAULT_INPUT_CURRENCY", "ARS").upper()
 
 DB_PATH = "budget.db"
 
-# ====== CONSTANTS ======
+# ===================== CONSTANTS =====================
 CATEGORIES = ["еда", "аренда", "развлечения", "прочее"]
 
 ACCOUNTS = [
@@ -70,7 +76,7 @@ EX_FROM_ACC, EX_TO_ACC, EX_AMOUNT, EX_RATE = range(4)
 REP_PERIOD, REP_CUSTOM_FROM, REP_CUSTOM_TO = range(3)
 REC_ACC, REC_AMOUNT = range(2)
 
-# ====== DB INIT ======
+# ===================== DB =====================
 def init_db():
     with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         c = conn.cursor()
@@ -187,7 +193,7 @@ def parse_period(kind, frm=None, to=None):
         end = now
     return start, end
 
-# ====== UI HELPERS ======
+# ===================== UI HELPERS =====================
 def cat_keyboard():
     buttons = [[InlineKeyboardButton(c.capitalize(), callback_data=f"cat:{c}")] for c in CATEGORIES]
     return InlineKeyboardMarkup(buttons)
@@ -212,8 +218,8 @@ def period_keyboard():
     opts = ["Сегодня","Неделя","Месяц","С начала месяца","Произвольный"]
     return InlineKeyboardMarkup([[InlineKeyboardButton(o, callback_data=f"period:{o}")] for o in opts])
 
-# ====== COMMANDS ======
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ===================== COMMANDS =====================
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init_db()
     text = (
         f"Привет! Я семейный бюджет-бот.\n\n"
@@ -235,7 +241,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text("Команды: /expense /income /exchange /setrate /balance /report /reconcile")
 
-# ====== EXPENSE FLOW ======
+# ===================== EXPENSE FLOW =====================
 async def expense_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите категорию расхода:", reply_markup=cat_keyboard())
     return EXP_CAT
@@ -278,7 +284,7 @@ async def expense_pick_acc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ====== INCOME FLOW ======
+# ===================== INCOME FLOW =====================
 async def income_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Введите сумму дохода (число).")
     return INC_AMOUNT
@@ -311,7 +317,7 @@ async def income_pick_acc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ====== EXCHANGE FLOW ======
+# ===================== EXCHANGE FLOW =====================
 async def exchange_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите счёт, ОТКУДА списываем:", reply_markup=accounts_keyboard())
     return EX_FROM_ACC
@@ -374,7 +380,7 @@ async def ex_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ====== SET RATE ======
+# ===================== SET RATE =====================
 async def setrate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = update.message.text.split()
     if len(parts) != 3:
@@ -388,7 +394,7 @@ async def setrate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(f"✅ Курс сохранён: 1 {ccy.upper()} = {rate} {BASE_CCY}")
 
-# ====== BALANCE ======
+# ===================== BALANCE =====================
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         total_usd, details = sum_balances_in_usd()
@@ -401,7 +407,7 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"\nИтого в USD: {round(total_usd,2)}")
     await update.message.reply_text("\n".join(lines))
 
-# ====== REPORT ======
+# ===================== REPORT =====================
 async def report_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите период отчёта:", reply_markup=period_keyboard())
     return REP_PERIOD
@@ -455,7 +461,7 @@ def make_report_text(start: datetime, end: datetime)->str:
             lines.append(f"• {cat}: {round(val,2)}")
     return "\n".join(lines)
 
-# ====== RECONCILE ======
+# ===================== RECONCILE =====================
 async def reconcile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите кошелёк для сверки:", reply_markup=accounts_keyboard())
     return REC_ACC
@@ -500,11 +506,11 @@ async def reconcile_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ====== HANDLERS & MAIN ======
+# ===================== PTB APP BUILD =====================
 def make_app():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("setrate", setrate))
     app.add_handler(CommandHandler("balance", balance))
@@ -518,7 +524,7 @@ def make_app():
             EXP_ACC: [CallbackQueryHandler(expense_pick_acc, pattern=r"^acc:")],
         },
         fallbacks=[],
-        per_message=False,   # важное отличие — гасит предупреждения PTB
+        per_message=False,
     )
     app.add_handler(exp_conv)
 
@@ -571,39 +577,36 @@ def make_app():
 
     return app
 
-import os
-from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-
+# ===================== FLASK + PTB RUNTIME =====================
 flask_app = Flask(__name__)
 
-# Создаём приложение Telegram
-application = Application.builder().token(BOT_TOKEN).build()
-import asyncio
-asyncio.run(application.initialize())
+# 1) Создаём PTB-приложение
+application = make_app()
 
-# --- Команды ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот работает! Пиши, что нужно записать.")
+# 2) Заводим единый event-loop и запускаем PTB в фоне
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
-application.add_handler(CommandHandler("start", start))
+async def _startup():
+    await application.initialize()
+    await application.start()
+    # НЕ делаем run_polling / run_webhook — мы принимаем апдейты через Flask
 
-# --- Webhook endpoint ---
+loop.create_task(_startup())
+
+def _run_loop():
+    loop.run_forever()
+
+threading.Thread(target=_run_loop, daemon=True).start()
+
+# 3) Webhook endpoint (синхронный) — безопасно прокидываем Update в очередь PTB
 @flask_app.post(f"/{BOT_TOKEN}")
 def webhook():
-    request_data = request.get_json(force=True)
-    update = Update.de_json(request_data, application.bot)
-    asyncio.run(application.process_update(update))
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+    asyncio.run_coroutine_threadsafe(application.update_queue.put(update), loop)
     return "ok", 200
 
-# Корневая страница — просто проверка
 @flask_app.get("/")
 def index():
     return "Bot is running", 200
-
-if __name__ == "__main__":
-    # Вебхук мы выставляем вручную через браузер (мы уже сделали)
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
