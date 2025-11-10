@@ -591,10 +591,13 @@ application.add_handler(CommandHandler("start", start))
 
 # --- Webhook endpoint ---
 @flask_app.post(f"/{BOT_TOKEN}")
-async def webhook():
+def webhook():
     request_data = request.get_json(force=True)
     update = Update.de_json(request_data, application.bot)
-    await application.process_update(update)
+
+    import asyncio
+    asyncio.run(application.process_update(update))
+
     return "ok", 200
 
 # Корневая страница — просто проверка
