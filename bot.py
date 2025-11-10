@@ -571,29 +571,37 @@ def make_app():
 
     return app
 
-import asyncio
+import os
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import ApplicationBuilder
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 flask_app = Flask(__name__)
 
-# 1) Создаём PTB-приложение один раз при импорте
-application = ApplicationBuilder().token(BOT_TOKEN).build()
+# Создаём приложение Telegram
+application = Application.builder().token(BOT_TOKEN).build()
 
-# 2) Инициализируем и стартуем его в фоновом event loop
-loop = asyncio.get_event_loop()
-loop.run_until_complete(application.initialize())
-loop.run_until_complete(application.start())
+# --- Команды ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Бот работает! Пиши, что нужно записать.")
 
+application.add_handler(CommandHandler("start", start))
+
+# --- Webhook endpoint ---
+@flask_app.post(f"/{BOT_TOKEN}")
+async def webhook():
+    request_data = request.get_json(force=True)
+    update = Update.de_json(request_data, application.bot)
+    await application.process_update(update)
+    return "ok", 200
+
+# Корневая страница — просто проверка
 @flask_app.get("/")
 def index():
-    return "OK", 200
+    return "Bot is running", 200
 
-# 3) Вебхук: Telegram будет слать сюда JSON
-@flask_app.post(f"/{BOT_TOKEN}")
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    # обрабатываем апдейт асинхронно
-    loop.create_task(application.process_update(update))
-    return "OK", 200
+if __name__ == "__main__":
+    # Вебхук мы выставляем вручную через браузер (мы уже сделали)
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
