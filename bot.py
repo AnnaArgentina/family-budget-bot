@@ -571,20 +571,22 @@ def make_app():
 
     return app
 
-from flask import Flask
-flask_app = Flask(__name__)
-
+from flask import Flask, request
+from telegram import Update
 from telegram.ext import ApplicationBuilder
 
-async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.run_polling()
+flask_app = Flask(__name__)
 
-@flask_app.route("/")
+# важно: BOT_TOKEN уже должен быть получен из .env, как у тебя в начале файла
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+@flask_app.get("/")
 def index():
-    return "Bot is running!", 200
+    return "OK", 200
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+@flask_app.post(f"/{BOT_TOKEN}")
+def webhook():
+    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+    telegram_app.create_task(telegram_app.process_update(update))
+    return "OK", 200
 
