@@ -574,19 +574,25 @@ def make_app():
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder
+import asyncio
+import os
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 flask_app = Flask(__name__)
+application = ApplicationBuilder().token(BOT_TOKEN).build()  # твои хендлеры уже добавлены выше
 
-# важно: BOT_TOKEN уже должен быть получен из .env, как у тебя в начале файла
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+# инициализируем PTB один раз
+asyncio.get_event_loop().run_until_complete(application.initialize())
 
 @flask_app.get("/")
-def index():
+def health():
     return "OK", 200
 
+# ВАЖНО: путь должен совпадать с тем, что в вебхуке — /<ТОКЕН>
 @flask_app.post(f"/{BOT_TOKEN}")
 def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.create_task(telegram_app.process_update(update))
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    # обрабатываем апдейт асинхронно
+    application.create_task(application.process_update(update))
     return "OK", 200
-
