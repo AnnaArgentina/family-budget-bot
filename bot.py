@@ -571,23 +571,20 @@ def make_app():
 
     return app
 
-# --- WEBHOOK MODE FOR PYTHONANYWHERE ---
-from flask import Flask, request
-import asyncio
-
+from flask import Flask
 flask_app = Flask(__name__)
-telegram_app = make_app()
 
-asyncio.run(telegram_app.initialize())
-asyncio.run(telegram_app.start())
+from telegram.ext import ApplicationBuilder
 
-@flask_app.route("/", methods=["GET"])
+async def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.run_polling()
+
+@flask_app.route("/")
 def index():
-    return "OK", 200
+    return "Bot is running!", 200
 
-@flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    asyncio.run(telegram_app.process_update(update))
-    return "OK", 200
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
 
