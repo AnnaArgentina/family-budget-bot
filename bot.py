@@ -582,6 +582,8 @@ flask_app = Flask(__name__)
 
 # Создаём приложение Telegram
 application = Application.builder().token(BOT_TOKEN).build()
+import asyncio
+asyncio.run(application.initialize())
 
 # --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -594,10 +596,7 @@ application.add_handler(CommandHandler("start", start))
 def webhook():
     request_data = request.get_json(force=True)
     update = Update.de_json(request_data, application.bot)
-
-    import asyncio
     asyncio.run(application.process_update(update))
-
     return "ok", 200
 
 # Корневая страница — просто проверка
